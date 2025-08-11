@@ -87,7 +87,6 @@ func main() {
 	}
 
 	http.HandleFunc("/ping", pingHandler)
-	http.HandleFunc("/v1.0/apps/env-list", envListHandler)
 	http.HandleFunc("/v1.0/github/event-logs/", eventLogsRootHandler) // we will parse the rest
 
 	addr := ":" + port
@@ -95,22 +94,6 @@ func main() {
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
-}
-
-func envListHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	env := map[string]interface{}{
-		"PORT":                        os.Getenv("PORT"),
-		"SUPABASE_URL":                os.Getenv("SUPABASE_URL"),
-		"SUPABASE_KEY":                os.Getenv("SUPABASE_KEY"),
-		"FIREBASE_PROJECT_ID":         os.Getenv("FIREBASE_PROJECT_ID"),
-		"GOOGLE_SERVICE_ACCOUNT_JSON": os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
-		"GOOGLE_SA_FILE":              os.Getenv("GOOGLE_SA_FILE"),
-	}
-	writeJSON(w, http.StatusOK, env)
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
