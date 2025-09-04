@@ -183,7 +183,7 @@ func handleEventLog(w http.ResponseWriter, r *http.Request, signatureID string) 
 	ok, err := verifyGithubSignature(r.Header.Get("X-Hub-Signature-256"), bodyBytes, record.SecretKey)
 	if err != nil || !ok {
 		http.Error(w, "signature key wrong", http.StatusUnauthorized)
-		return errors.New("signature verification failed:" + err.Error())
+		return err
 	}
 
 	// 3) Save to Firestore
@@ -196,8 +196,8 @@ func handleEventLog(w http.ResponseWriter, r *http.Request, signatureID string) 
 	saJSON := os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 	if saJSON == "" {
 		// fallback to file path
-		if path := os.Getenv("GOOGLE_SA_FILE"); path != "" {
-			b, e := os.ReadFile(path)
+		if pathGoogleSaFile := os.Getenv("GOOGLE_SA_FILE"); pathGoogleSaFile != "" {
+			b, e := os.ReadFile(pathGoogleSaFile)
 			if e != nil {
 				http.Error(w, "server misconfigured: cannot read service account file", http.StatusInternalServerError)
 				return e
@@ -245,8 +245,8 @@ func fetchSignatureFromSupabase(supabaseURL, supabaseKey, signatureID string) (*
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljZ2ZmenR1amVsYW1keXZqbmJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQwNzE5NjYsImV4cCI6MjA2OTY0Nzk2Nn0.DqbZvoyT7-tho_rWntG1QIrOT88yznEcP6BJ1_W-k38")
-	req.Header.Set("Authorization", "Bearer "+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljZ2ZmenR1amVsYW1keXZqbmJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQwNzE5NjYsImV4cCI6MjA2OTY0Nzk2Nn0.DqbZvoyT7-tho_rWntG1QIrOT88yznEcP6BJ1_W-k38")
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
 	// supabase requires Accept: application/json
 	req.Header.Set("Accept", "application/json")
 
@@ -254,7 +254,12 @@ func fetchSignatureFromSupabase(supabaseURL, supabaseKey, signatureID string) (*
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("supabase returned status %d: %s", resp.StatusCode, string(b))
@@ -383,7 +388,12 @@ func saveToFirestore(saJSON, projectID, collection string, payload interface{}) 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("firestore returned %d: %s", resp.StatusCode, string(b))
@@ -467,7 +477,12 @@ func getAccessTokenFromSA(sa ServiceAccount) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(b))
@@ -508,5 +523,8 @@ func parsePrivateKeyFromPEM(pemStr string) (*rsa.PrivateKey, error) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	err := json.NewEncoder(w).Encode(v)
+	if err != nil {
+		return
+	}
 }
