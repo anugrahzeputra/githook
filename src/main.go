@@ -120,7 +120,10 @@ func eventLogsRootHandler(w http.ResponseWriter, r *http.Request) {
 	signatureID := strings.TrimPrefix(r.URL.Path, prefix)
 	if signatureID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, "missing signature id")
+		_, err := fmt.Fprint(w, "missing signature id")
+		if err != nil {
+			return
+		}
 		return
 	}
 
@@ -150,7 +153,12 @@ func handleEventLog(w http.ResponseWriter, r *http.Request, signatureID string) 
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return err
 	}
-	defer r.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(r.Body)
 
 	// 1) Fetch signature from Supabase
 	record, err := fetchSignatureFromSupabase(supabaseURL, supabaseKey, signatureID)
@@ -353,13 +361,11 @@ func saveToFirestore(saJSON, projectID, collection string, payload interface{}) 
 	doc := map[string]interface{}{
 		"fields": map[string]interface{}{},
 	}
-	// store payload as json value under 'payload' field
-	payloadBytes, _ := json.Marshal(payload)
 	// Firestore expects typed fields, we'll store JSON string under "payload": { stringValue: ... }
 	// and received_at as timestampValue
 	fields := map[string]interface{}{
-		"payload":     map[string]interface{}{"stringValue": string(payloadBytes)},
-		"received_at": map[string]interface{}{"timestampValue": time.Now().UTC().Format(time.RFC3339)},
+		"payload":     makeFirestoreValue(payload),
+		"received_at": makeFirestoreValue(time.Now().UTC().Format(time.RFC3339)),
 	}
 	doc["fields"] = fields
 
@@ -382,6 +388,34 @@ func saveToFirestore(saJSON, projectID, collection string, payload interface{}) 
 		return fmt.Errorf("firestore returned %d: %s", resp.StatusCode, string(b))
 	}
 	return nil
+}
+
+func makeFirestoreValue(v interface{}) map[string]interface{} {
+	switch val := v.(type) {
+	case string:
+		return map[string]interface{}{"stringValue": v}
+	case []byte:
+		return map[string]interface{}{"bytesValue": base64.StdEncoding.EncodeToString(val)}
+	case int, int32, int64:
+		return map[string]interface{}{"integerValue": fmt.Sprintf("%v", val)}
+	case float32, float64:
+		return map[string]interface{}{"doubleValue": val}
+	case bool:
+		return map[string]interface{}{"booleanValue": val}
+	case time.Time:
+		return map[string]interface{}{"timestampValue": val.UTC().Format(time.RFC3339)}
+	case map[string]interface{}:
+		// nested map (objectValue)
+		fields := make(map[string]interface{})
+		for k, v2 := range val {
+			fields[k] = makeFirestoreValue(v2)
+		}
+		return map[string]interface{}{"mapValue": map[string]interface{}{"fields": fields}}
+	default:
+		// fallback → simpan sebagai string JSON
+		b, _ := json.Marshal(val)
+		return map[string]interface{}{"stringValue": string(b)}
+	}
 }
 
 func getAccessTokenFromSA(sa ServiceAccount) (string, error) {
