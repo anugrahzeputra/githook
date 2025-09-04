@@ -366,6 +366,7 @@ func saveToFirestore(saJSON, projectID, collection string, payload interface{}) 
 	fields := map[string]interface{}{
 		"payload":     makeFirestoreValue(payload),
 		"received_at": makeFirestoreValue(time.Now().UTC().Format(time.RFC3339)),
+		"version":     makeFirestoreValue("2"),
 	}
 	doc["fields"] = fields
 
